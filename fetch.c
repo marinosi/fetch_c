@@ -48,53 +48,10 @@ __FBSDID("$FreeBSD: stable/9/usr.bin/fetch/fetch.c 244499 2012-12-20 18:13:04Z e
 #include <fetch.h>
 #include "fetch_internal.h"
 
-#define MINBUFSIZE	4096
-#define TIMEOUT		120
-
-/* Option flags */
-int	 A_flag;	/*    -A: do not follow 302 redirects */
-int	 a_flag;	/*    -a: auto retry */
-off_t	 B_size;	/*    -B: buffer size */
-int	 b_flag;	/*!   -b: workaround TCP bug */
-char    *c_dirname;	/*    -c: remote directory */
-int	 d_flag;	/*    -d: direct connection */
-int	 F_flag;	/*    -F: restart without checking mtime  */
-char	*f_filename;	/*    -f: file to fetch */
-char	*h_hostname;	/*    -h: host to fetch from */
-int	 i_flag;	/*    -i: specify input file for mtime comparison */
-char	*i_filename;	/*        name of input file */
-int	 l_flag;	/*    -l: link rather than copy file: URLs */
-int	 m_flag;	/* -[Mm]: mirror mode */
-char	*N_filename;	/*    -N: netrc file name */
-int	 n_flag;	/*    -n: do not preserve modification time */
-int	 o_flag;	/*    -o: specify output file */
-int	 o_directory;	/*        output file is a directory */
-char	*o_filename;	/*        name of output file */
-int	 o_stdout;	/*        output file is stdout */
-int	 once_flag;	/*    -1: stop at first successful file */
-int	 p_flag;	/* -[Pp]: use passive FTP */
-int	 R_flag;	/*    -R: don't delete partially transferred files */
-int	 r_flag;	/*    -r: restart previously interrupted transfer */
-off_t	 S_size;        /*    -S: require size to match */
-int	 s_flag;        /*    -s: show size, don't fetch */
-long	 T_secs;	/*    -T: transfer timeout in seconds */
-int	 t_flag;	/*!   -t: workaround TCP bug */
-int	 U_flag;	/*    -U: do not use high ports */
 int	 v_level = 1;	/*    -v: verbosity level */
-int	 v_tty;		/*        stdout is a tty */
-pid_t	 pgrp;		/*        our process group */
-long	 w_secs;	/*    -w: retry delay */
 int	 family = PF_UNSPEC;	/* -[46]: address family to use */
-
-int	 sigalrm;	/* SIGALRM received */
-int	 siginfo;	/* SIGINFO received */
-int	 sigint;	/* SIGINT received */
-
 long	 ftp_timeout = TIMEOUT;		/* default timeout for FTP transfers */
 long	 http_timeout = TIMEOUT;	/* default timeout for HTTP transfers */
-char	*buf;		/* transfer buffer */
-
-
 /*
  * Signal handler
  */
@@ -776,6 +733,13 @@ main(int argc, char *argv[])
 	char *end, *q;
 	int c, e, r;
 
+#ifndef NO_SANDBOX
+	/*
+	 * Initiate sandbox.
+	 */
+	fetch_sandbox_init();
+#endif
+
 	while ((c = getopt(argc, argv,
 	    "146AaB:bc:dFf:Hh:i:lMmN:nPpo:qRrS:sT:tUvw:")) != -1)
 		switch (c) {
@@ -918,11 +882,13 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+#ifdef NO_SANDBOX
 	/* allocate buffer */
 	if (B_size < MINBUFSIZE)
 		B_size = MINBUFSIZE;
 	if ((buf = malloc(B_size)) == NULL)
 		errx(1, "%s", strerror(ENOMEM));
+#endif
 
 	/* timeouts */
 	if ((s = getenv("FTP_TIMEOUT")) != NULL) {
@@ -981,13 +947,6 @@ main(int argc, char *argv[])
 		if (setenv("NETRC", N_filename, 1) == -1)
 			err(1, "setenv: cannot set NETRC=%s", N_filename);
 
-	/*
-	 * XXX IM: Dummy sandbox initialization (it's very late at this point :) )
-	 * Invoking here *only* for functionality testing.
-	 */
-
-
-	fetch_sandbox_init();
 	while (argc) {
 		if ((p = strrchr(*argv, '/')) == NULL)
 			p = *argv;
@@ -1015,6 +974,10 @@ main(int argc, char *argv[])
 		} else {
 			e = fetch_wrapper(*argv, p);
 		}
+
+#ifndef NO_SANDBOX
+		fetch_sandbox_wait();
+#endif
 
 		if (sigint)
 			kill(getpid(), SIGINT);

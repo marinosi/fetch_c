@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
@@ -62,6 +63,23 @@ struct sandbox_cb *fscb;
 struct fetch_req {
 	char	hf_req_url[URL_MAX];
 	char	hf_req_path[URL_MAX];
+	char	hf_req_i_filename[PATH_MAX];	/* name of input file */
+	int	 v_level;	/*    -v: verbosity level */
+	int	 family;	/* -[46]: address family to use */
+	int	 d_flag;	/*    -d: direct connection */
+	int	 A_flag;	/*    -A: do not follow 302 redirects */
+	int	 i_flag;	/*    -i: specify input file for mtime comparison */
+	int	 s_flag;        /*    -s: show size, don't fetch */
+	int	 o_stdout;	/*        output file is stdout */
+	int	 r_flag;	/*    -r: restart previously interrupted transfer */
+	off_t	 S_size;        /*    -S: require size to match */
+	int	 l_flag;	/*    -l: link rather than copy file: URLs */
+	int	 F_flag;	/*    -F: restart without checking mtime  */
+	int	 R_flag;	/*    -R: don't delete partially transferred files */
+	int	 m_flag;	/* -[Mm]: mirror mode */
+	off_t	 B_size;	/*    -B: buffer size */
+	long	 ftp_timeout;		/* default timeout for FTP transfers */
+	long	 http_timeout;	/* default timeout for HTTP transfers */
 } __packed;
 
 struct fetch_rep {
@@ -82,6 +100,13 @@ fetch_sandbox_init(void)
 
 }
 
+void
+fetch_sandbox_wait(void)
+{
+	wait(&rv);
+	DPRINTF("Sandbox's exit status is %d", WEXITSTATUS(rv));
+}
+
 /* Called in parent to proxy the request though the sandbox */
 static off_t
 fetch_insandbox(char *origurl, const char *origpath)
@@ -92,9 +117,31 @@ fetch_insandbox(char *origurl, const char *origpath)
 	int fdarray[1];
 	size_t len;
 
+	/* Clear out req */
 	bzero(&req, sizeof(req));
+
+	/* Pass needed data */
 	strlcpy(req.hf_req_url, origurl, sizeof(req.hf_req_url));
 	strlcpy(req.hf_req_path, origpath, sizeof(req.hf_req_url));
+	if (i_flag)
+		strlcpy(req.hf_req_i_filename, i_filename, MMIN(sizeof(req.hf_req_i_filename), sizeof(i_filename)));
+	req.v_level = v_level;
+	req.d_flag = d_flag;
+	req.A_flag = A_flag;
+	req.i_flag = i_flag;
+	req.s_flag = s_flag;
+	req.o_stdout = o_stdout;
+	req.r_flag = r_flag;
+	req.S_size = S_size;
+	req.l_flag = l_flag;
+	req.F_flag = F_flag;
+	req.R_flag = R_flag;
+	req.m_flag = m_flag;
+	req.B_size = B_size;
+	req.http_timeout = http_timeout;
+	req.ftp_timeout = ftp_timeout;
+
+
 	iov_req.iov_base = &req;
 	iov_req.iov_len = sizeof(req);
 	iov_rep.iov_base = &rep;
@@ -121,7 +168,31 @@ sandbox_fetch(struct sandbox_cb *scb, uint32_t opno, uint32_t seqno, char
 	if (len != sizeof(req))
 		err(-1, "sandbox_fetch: len %zu", len);
 
+	/* Demangle data */
 	bcopy(buffer, &req, sizeof(req));
+	v_level = req.v_level;
+	d_flag = req.d_flag;
+	A_flag = req.A_flag;
+	i_flag = req.i_flag;
+	s_flag = req.s_flag;
+	o_stdout = req.o_stdout;
+	r_flag = req.r_flag;
+	S_size = req.S_size;
+	l_flag = req.l_flag;
+	F_flag = req.F_flag;
+	R_flag = req.R_flag;
+	m_flag = req.m_flag;
+	B_size = req.B_size;
+	http_timeout = http_timeout;
+	ftp_timeout = ftp_timeout;
+	i_filename = (i_flag ? req.hf_req_i_filename: NULL);
+
+	/* allocate buffer */
+	if (B_size < MINBUFSIZE)
+		B_size = MINBUFSIZE;
+	if ((buf = malloc(B_size)) == NULL)
+		errx(1, "%s", strerror(ENOMEM));
+
 	bzero(&rep, sizeof(rep));
 	rep.hf_rep_retval = fetch(req.hf_req_url, req.hf_req_path);
 	iov.iov_base = &rep;
