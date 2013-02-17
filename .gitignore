@@ -1,0 +1,7 @@
+# Compiled objects #
+####################
+*.o
+*.so
+
+# Compressed objects
+*.gz

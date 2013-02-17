@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD: stable/9/usr.bin/fetch/fetch.c 244499 2012-12-20 18:13:04Z e
 #include <unistd.h>
 
 #include <fetch.h>
+#include "fetch_internal.h"
 
 #define MINBUFSIZE	4096
 #define TIMEOUT		120
@@ -309,7 +310,7 @@ query_auth(struct url *URL)
 /*
  * Fetch a file
  */
-static int
+int
 fetch(char *URL, const char *path)
 {
 	struct url *url;
@@ -980,6 +981,13 @@ main(int argc, char *argv[])
 		if (setenv("NETRC", N_filename, 1) == -1)
 			err(1, "setenv: cannot set NETRC=%s", N_filename);
 
+	/*
+	 * XXX IM: Dummy sandbox initialization (it's very late at this point :) )
+	 * Invoking here *only* for functionality testing.
+	 */
+
+
+	fetch_sandbox_init();
 	while (argc) {
 		if ((p = strrchr(*argv, '/')) == NULL)
 			p = *argv;
@@ -993,16 +1001,19 @@ main(int argc, char *argv[])
 
 		if (o_flag) {
 			if (o_stdout) {
-				e = fetch(*argv, "-");
+				/* XXX IM: Needed for sandboxed operation */
+				e = fetch_wrapper(*argv, "-");
 			} else if (o_directory) {
 				asprintf(&q, "%s/%s", o_filename, p);
-				e = fetch(*argv, q);
+				/* XXX IM: Needed for sandboxed operation */
+				e = fetch_wrapper(*argv, q);
 				free(q);
 			} else {
-				e = fetch(*argv, o_filename);
+				/* XXX IM: Needed for sandboxed operation */
+				e = fetch_wrapper(*argv, o_filename);
 			}
 		} else {
-			e = fetch(*argv, p);
+			e = fetch_wrapper(*argv, p);
 		}
 
 		if (sigint)
