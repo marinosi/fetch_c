@@ -1,4 +1,4 @@
 fetch_c
 =======
 
-A compartmentalised BSD fetch. Depends on libfetch (github.com/marinosi/libsep).
+A compartmentalised BSD fetch. Depends on libsep (github.com/marinosi/libsep).
