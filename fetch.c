@@ -976,7 +976,7 @@ main(int argc, char *argv[])
 		}
 
 #ifndef NO_SANDBOX
-		/*fetch_sandbox_wait();*/
+		fetch_sandbox_wait();
 #endif
 
 		if (sigint)
