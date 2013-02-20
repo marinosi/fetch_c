@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/wait.h>
 #include <string.h>
 #include <strings.h>
@@ -36,9 +37,12 @@
 #include <errno.h>
 #include <err.h>
 
+#ifndef NO_SANDBOX
 #include <sandbox.h>
 /*#include <sandbox_rpc.h>*/
+#endif
 
+#include <fetch.h>
 #include "fetch_internal.h"
 
 /* DPRINTF */
@@ -55,8 +59,10 @@
 /* Operations */
 #define NO_OP 0
 #define PROXIED_FETCH 1
+#define PROXIED_FETCH_PARSE_URL 2
 
 
+#ifndef NO_SANDBOX
 /* fetch sandbox control block */
 struct sandbox_cb *fscb;
 
@@ -84,6 +90,23 @@ struct fetch_req {
 
 struct fetch_rep {
 	off_t	hf_rep_retval;
+} __packed;
+
+struct fetch_parse_url_req {
+	char url_s[URL_MAX];
+} __packed;
+
+struct fetch_parse_url_rep {
+	char		 scheme[URL_SCHEMELEN+1];
+	char		 user[URL_USERLEN+1];
+	char		 pwd[URL_PWDLEN+1];
+	char		 host[MAXHOSTNAMELEN+1];
+	int		 port;
+	off_t		 offset;
+	size_t		 length;
+	time_t		 ims_time;
+	char doc[URL_MAX];
+	int ret;
 } __packed;
 
 static void fsandbox(void);
@@ -114,7 +137,6 @@ fetch_insandbox(char *origurl, const char *origpath)
 	struct fetch_req req;
 	struct fetch_rep rep;
 	struct iovec iov_req, iov_rep;
-	int fdarray[1];
 	size_t len;
 
 	/* Clear out req */
@@ -124,7 +146,8 @@ fetch_insandbox(char *origurl, const char *origpath)
 	strlcpy(req.hf_req_url, origurl, sizeof(req.hf_req_url));
 	strlcpy(req.hf_req_path, origpath, sizeof(req.hf_req_url));
 	if (i_flag)
-		strlcpy(req.hf_req_i_filename, i_filename, MMIN(sizeof(req.hf_req_i_filename), sizeof(i_filename)));
+		strlcpy(req.hf_req_i_filename, i_filename,
+			MMIN(sizeof(req.hf_req_i_filename), sizeof(i_filename)));
 	req.v_level = v_level;
 	req.d_flag = d_flag;
 	req.A_flag = A_flag;
@@ -152,7 +175,6 @@ fetch_insandbox(char *origurl, const char *origpath)
 	if (len != sizeof(rep))
 		errx(-1, "host_rpc");
 
-	close(fdarray[0]);
 	return (rep.hf_rep_retval);
 }
 
@@ -202,6 +224,54 @@ sandbox_fetch(struct sandbox_cb *scb, uint32_t opno, uint32_t seqno, char
 
 }
 
+static void
+sandbox_parse_url(struct sandbox_cb *scb, uint32_t opno, uint32_t seqno, char
+	*buffer, size_t len)
+{
+	struct fetch_parse_url_req req;
+	struct fetch_parse_url_rep rep;
+	struct url *urlptr;
+	struct iovec iov;
+
+	/* Initialize data */
+	bzero(&req, sizeof(req));
+	bzero(&rep, sizeof(rep));
+	bzero(&iov, sizeof(iov));
+
+	/* Demangle data */
+	bcopy(buffer, &req, sizeof(req));
+
+	/* Perform the risky call */
+	if ((urlptr = fetchParseURL(req.url_s)) == NULL) {
+		warn("%s: parse error", req.url_s);
+		rep.ret = -1; /* Indicate failure */
+	}
+
+	/* If it was a success */
+	if (!rep.ret) {
+		/*bcopy(urlptr, &rep.url_r, sizeof(struct url));*/
+		strlcpy(rep.scheme, urlptr->scheme, sizeof(rep.scheme));
+		strlcpy(rep.user, urlptr->user, sizeof(rep.user));
+		strlcpy(rep.pwd, urlptr->pwd, sizeof(rep.pwd));
+		strlcpy(rep.host, urlptr->host, sizeof(rep.host));
+		rep.port = urlptr->port;
+		rep.offset = urlptr->offset;
+		rep.length = urlptr->length;
+		rep.ims_time = urlptr->ims_time;
+		strlcpy(rep.doc, urlptr->doc, sizeof(rep.doc));
+	}
+
+	iov.iov_base = &rep;
+	iov.iov_len = sizeof(rep);
+
+	/* Send the parsed URL back to the parent */
+	if (sandbox_sendrpc(scb, opno, seqno, &iov, 1) < 0)
+		err(-1, "sandbox_send_rpc");
+
+	if (urlptr)
+		fetchFreeURL(urlptr);
+}
+
 
 static void
 fsandbox(void)
@@ -229,24 +299,86 @@ fsandbox(void)
 		/* fetch the url and return */
 		sandbox_fetch(fscb, opno, seqno, (char *)buffer, len);
 		break;
+	case PROXIED_FETCH_PARSE_URL:
+		sandbox_parse_url(fscb, opno, seqno, (char *)buffer, len);
+		break;
 	/* For future expansion */
-	/*default:*/
-		/*errx(-1, "sandbox_main: unknown op %d", opno);-*/
+	default:
+		errx(-1, "sandbox_main: unknown op %d", opno);
 	}
 
 	/* Free buffer */
 	free(buffer);
 
+	DPRINTF("Sandbox exiting!");
 	/* exit */
 	exit(0);
 }
 
+#endif
+
 int
 fetch_wrapper(char *URL, const char *path)
 {
-#ifdef NO_SANDBOX
+	/* Currently haven't tested using both sandboxes at once */
+#if defined(NO_SANDBOX) || defined(SANDBOX_PARSE_URL)
 	return (fetch(URL, path));
 #else
 	return (fetch_insandbox(URL, path));
 #endif
+}
+
+struct url *
+parse_url_wrapper(char *URL)
+{
+	struct url *uptr;
+
+#if ! defined(SANDBOX_PARSE_URL)
+	if ((uptr = fetchParseURL(URL)) == NULL) {
+		warnx("%s: parse error", URL);
+		return NULL;
+	}
+#else
+	size_t len;
+	struct fetch_parse_url_req req;
+	struct fetch_parse_url_rep rep;
+	struct iovec iov_req, iov_rep;
+
+
+	/* Init data */
+	bzero(&rep, sizeof(rep));
+	bzero(&iov_req, sizeof(iov_req));
+	bzero(&iov_rep, sizeof(iov_rep));
+
+	strlcpy(req.url_s, URL, sizeof(req.url_s));
+	iov_req.iov_base = &req;
+	iov_req.iov_len = sizeof(req);
+	iov_rep.iov_base = &rep;
+	iov_rep.iov_len = sizeof(rep);
+	if (host_rpc(fscb, PROXIED_FETCH_PARSE_URL, &iov_req, 1,  &iov_rep, 1, &len)
+		< 0)
+		err(-1, "host_rpc");
+
+	if (len != sizeof(rep))
+		err(-1, "host_rpc");
+
+	/*ret should be 0 for success */
+	if (rep.ret)
+		return NULL;
+
+
+	DPRINTF("SCHEME: %s HOST: %s, PORT: %d DOC: %s", rep.scheme, rep.host,
+		rep.port, rep.doc);
+	uptr = fetchMakeURL(rep.scheme, rep.host, rep.port, rep.doc, rep.user, rep.pwd);
+	if ((uptr = fetchParseURL(URL)) == NULL) {
+		warnx("%s: parse error", URL);
+		return NULL;
+	}
+#endif
+
+	DPRINTF("SCHEME: %s HOST: %s, PORT: %d DOC: %s USR: %s PWD: %s OFFSET: %ld",
+		uptr->scheme, uptr->host, uptr->port, uptr->doc, uptr->user, uptr->pwd,
+		uptr->offset);
+
+	return uptr;
 }

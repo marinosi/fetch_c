@@ -303,7 +303,7 @@ fetch(char *URL, const char *path)
 		warnx("empty URL");
 		goto failure;
 	}
-	if ((url = fetchParseURL(URL)) == NULL) {
+	if ((url = parse_url_wrapper(URL)) == NULL) {
 		warnx("%s: parse error", URL);
 		goto failure;
 	}
@@ -882,7 +882,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-#ifdef NO_SANDBOX
+#if defined(NO_SANDBOX) || defined(SANDBOX_PARSE_URL)
 	/* allocate buffer */
 	if (B_size < MINBUFSIZE)
 		B_size = MINBUFSIZE;
@@ -976,7 +976,7 @@ main(int argc, char *argv[])
 		}
 
 #ifndef NO_SANDBOX
-		fetch_sandbox_wait();
+		/*fetch_sandbox_wait();*/
 #endif
 
 		if (sigint)

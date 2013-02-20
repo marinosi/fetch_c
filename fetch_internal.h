@@ -33,6 +33,7 @@
 #include <limits.h>
 #include <sys/param.h>
 #include <sys/limits.h>
+#include <fetch.h>
 /* Maximum URL length handled */
 #define URL_MAX	2048
 #define MINBUFSIZE	4096
@@ -91,5 +92,6 @@ void fetch_sandbox_init(void);
 void fetch_sandbox_wait(void);
 int fetch_wrapper(char *, const char *);
 int fetch(char *, const char *);
+struct url *parse_url_wrapper(char *url);
 
 #endif	/* _FETCH_INTERNAL_H_ */
