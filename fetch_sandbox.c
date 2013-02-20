@@ -370,10 +370,6 @@ parse_url_wrapper(char *URL)
 	DPRINTF("SCHEME: %s HOST: %s, PORT: %d DOC: %s", rep.scheme, rep.host,
 		rep.port, rep.doc);
 	uptr = fetchMakeURL(rep.scheme, rep.host, rep.port, rep.doc, rep.user, rep.pwd);
-	if ((uptr = fetchParseURL(URL)) == NULL) {
-		warnx("%s: parse error", URL);
-		return NULL;
-	}
 #endif
 
 	DPRINTF("SCHEME: %s HOST: %s, PORT: %d DOC: %s USR: %s PWD: %s OFFSET: %ld",
