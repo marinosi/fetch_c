@@ -36,8 +36,10 @@
 #include <errno.h>
 #include <err.h>
 
+#ifndef NO_SANDBOX
 #include <sandbox.h>
 /*#include <sandbox_rpc.h>*/
+#endif
 
 #include "fetch_internal.h"
 
@@ -57,6 +59,7 @@
 #define PROXIED_FETCH 1
 
 
+#ifndef NO_SANDBOX
 /* fetch sandbox control block */
 struct sandbox_cb *fscb;
 
@@ -240,6 +243,7 @@ fsandbox(void)
 	/* exit */
 	exit(0);
 }
+#endif
 
 int
 fetch_wrapper(char *URL, const char *path)

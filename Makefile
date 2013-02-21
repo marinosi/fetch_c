@@ -21,6 +21,8 @@ LDADD=		-lfetch -lmd
 CFLAGS+=	-I ../libsep
 DPADD+=		${LIBSEP}
 LDADD+=		-L../libsep/ -lsep
+.else
+CFLAGS+=	-DNO_SANDBOX
 .endif
 
 .include <bsd.prog.mk>
